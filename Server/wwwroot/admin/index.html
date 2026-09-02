@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>驱入虚空 - 私服管理面板</title>
+    <style>
+        body { font-family: 'Microsoft YaHei', sans-serif; margin: 20px; background: #1a1a2e; color: #eee; }
+        h1 { color: #e94560; }
+        h2 { color: #16213e; border-bottom: 2px solid #e94560; padding-bottom: 5px; }
+        .card { background: #16213e; border-radius: 8px; padding: 15px; margin: 10px 0; }
+        .status { display: inline-block; padding: 4px 12px; border-radius: 4px; background: #4caf50; color: white; }
+        .gm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+        .gm-btn { background: #0f3460; color: white; border: none; padding: 10px; border-radius: 4px; cursor: pointer; text-align: left; }
+        .gm-btn:hover { background: #e94560; }
+        .gm-btn:active { background: #c73e54; }
+        .log-box { background: #0a0a15; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 12px; max-height: 300px; overflow-y: auto; }
+        .log-info { color: #4fc3f7; }
+        .log-warn { color: #ffb74d; }
+        .log-error { color: #ef5350; }
+        .log-success { color: #81c784; }
+        input[type=text] { background: #0a0a15; color: #eee; border: 1px solid #0f3460; padding: 8px; border-radius: 4px; width: 200px; }
+        .section-title { color: #e94560; font-weight: bold; margin: 15px 0 10px 0; }
+        a { color: #4fc3f7; }
+    </style>
+</head>
+<body>
+    <h1>驱入虚空 · 私服管理面板</h1>
+    <div class="card">
+        <span class="status" id="serverStatus">服务器运行中</span>
+        <p>版本: 2.1.0.1 | 端口: TCP 5313 / HTTP 8183</p>
+        <p><a href="/health">健康检查</a> | <a href="/download">启动器接口</a> | <a href="/query/serverList">服务器列表</a></p>
+    </div>
+
+    <h2>GM 命令面板</h2>
+    <div class="card">
+        <div class="section-title">玩家与等级</div>
+        <div class="gm-grid">
+            <button class="gm-btn" onclick="sendGM('37','玩家升级 (CheatPlayerLvUp)')">玩家升级</button>
+            <button class="gm-btn" onclick="sendGM('30','添加精通 (CheatAddMR)')">添加精通等级</button>
+            <button class="gm-btn" onclick="sendGM('38','毕业 (CheatGraduate)')">技能树毕业</button>
+            <button class="gm-btn" onclick="sendGM('102','打开技能树 (CheatTreeOpen)')">解锁技能树</button>
+        </div>
+        <div class="section-title">物品与货币</div>
+        <div class="gm-grid">
+            <button class="gm-btn" onclick="sendGM('43','添加奖励箱 (CheatAddRewardChest)')">添加奖励箱</button>
+            <button class="gm-btn" onclick="sendGM('252','涌泉点数 (CheatAddWellingPoints)')">添加涌泉点数</button>
+            <button class="gm-btn" onclick="sendGM('88','清空背包 (CheatCleanBag)')">清空背包</button>
+            <button class="gm-btn" onclick="sendGM('98','解锁背包 (CheatUnlockPack)')">扩展背包</button>
+            <button class="gm-btn" onclick="sendGM('34','装备经验 (CheatAddEquipmentExp)')">添加装备经验</button>
+            <button class="gm-btn" onclick="sendGM('92','全Mod满级 (CheatFullRankAllMod)')">全Mod满级</button>
+            <button class="gm-btn" onclick="sendGM('255','所有展示Mod (CheatGetAllShownMod)')">获取所有展示Mod</button>
+        </div>
+
+        <div class="section-title">货币发放</div>
+        <div class="gm-grid">
+            <select id="currencyType" style="background:#0a0a15;color:#eee;border:1px solid #0f3460;padding:8px;border-radius:4px;">
+                <option value="21" selected>晶卷 (CrystalCredit=21)</option>
+                <option value="1">金币 (Gold=1)</option>
+                <option value="2">垄金 (Diamond=2)</option>
+                <option value="14">绑定垄金 (BoundDiamond=14)</option>
+            </select>
+            <input type="text" id="currencyCount" value="8000" style="background:#0a0a15;color:#eee;border:1px solid #0f3460;padding:8px;border-radius:4px;width:100px;">
+            <button class="gm-btn" onclick="sendCurrency()">发放货币</button>
+        </div>
+        <p style="font-size:12px;color:#888">发放后立即推送在线客户端刷新货币，重登后仍然保留。</p>
+        <div class="section-title">关卡与地图</div>
+        <div class="gm-grid">
+            <button class="gm-btn" onclick="sendGM('18','解锁城市 (CheatUnlockCity)')">解锁所有城市</button>
+            <button class="gm-btn" onclick="sendGM('100','解锁敌人 (CheatUnlockAllEnemy)')">解锁全部敌人</button>
+            <button class="gm-btn" onclick="sendGM('258','S级突破 (CheatRoadSRankBreak)')">S级道路突破</button>
+            <button class="gm-btn" onclick="sendGM('130','GM进入关卡 (GMTeamEnterLevel)')">GM进入关卡</button>
+        </div>
+        <div class="section-title">任务与悬赏</div>
+        <div class="gm-grid">
+            <button class="gm-btn" onclick="sendGM('45','设置任务 (CheatSetQuest)')">设置任务状态</button>
+            <button class="gm-btn" onclick="sendGM('90','完成悬赏 (CheatCompleteBounty)')">完成悬赏</button>
+            <button class="gm-btn" onclick="sendGM('250','添加悬赏 (CheatAddBounty)')">添加悬赏</button>
+        </div>
+        <div class="section-title">支付与商店</div>
+        <div class="gm-grid">
+            <button class="gm-btn" onclick="sendGM('94','完成支付 (CheatPaymentFinish)')">绕过付费</button>
+            <button class="gm-btn" onclick="sendGM('89','清除购买记录 (CheatClearShopBuyInfo)')">重置商店限购</button>
+            <button class="gm-btn" onclick="sendGM('265','随机特惠 (CheatWildOffer)')">随机特惠</button>
+        </div>
+        <div class="section-title">其他</div>
+        <div class="gm-grid">
+            <button class="gm-btn" onclick="sendGM('254','技能武器槽 (CheatFrameSkillAndWeaponSlot)')">解锁技能武器槽</button>
+            <button class="gm-btn" onclick="sendGM('256','极化 (CheatPolarization)')">极化装备</button>
+            <button class="gm-btn" onclick="sendGM('260','搜索点 (CheatSearchPoint)')">添加搜索点</button>
+            <button class="gm-btn" onclick="sendGM('263','签到 (CheatSignIn)')">完成签到</button>
+            <button class="gm-btn" onclick="sendGM('251','失物邮件 (CheatAddLostMail)')">添加失物邮件</button>
+            <button class="gm-btn" onclick="sendGM('266','宠物升级 (GMPetUpRank)')">GM宠物升级</button>
+            <button class="gm-btn" onclick="sendGM('75','设置切片 (CheatSetSlice)')">设置Mod切片</button>
+            <button class="gm-btn" onclick="sendGM('264','转换普通 (CheatTransformNormal)')">转换为普通品质</button>
+        </div>
+    </div>
+
+    <h2>自定义路由测试</h2>
+    <div class="card">
+        <p>路由ID: <input type="text" id="customRoute" value="6" placeholder="例如: 6=PlayerData">
+        <button class="gm-btn" style="display:inline" onclick="sendCustom()">发送请求</button></p>
+        <p style="font-size:12px;color:#888">常用路由: 1=背包列表, 2=进入, 6=玩家数据, 9=角色小队, 14=结算, 20=任务列表, 110=关卡开始</p>
+    </div>
+
+    <h2>日志</h2>
+    <div class="card">
+        <div class="log-box" id="logBox"></div>
+    </div>
+
+<script>
+function log(msg, type) {
+    var box = document.getElementById('logBox');
+    var time = new Date().toLocaleTimeString();
+    var div = document.createElement('div');
+    div.className = 'log-' + (type || 'info');
+    div.textContent = '[' + time + '] ' + msg;
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+}
+
+async function sendGM(route, name) {
+    log('发送 GM 命令: ' + name + ' (route=' + route + ')');
+    try {
+        var res = await fetch('/admin/api/gm?route=' + encodeURIComponent(route));
+        var data = await res.json();
+        if (data.success) {
+            log(name + ' 执行成功 (' + data.size + ' bytes)', 'success');
+        } else {
+            log(name + ' 执行失败: ' + data.error, 'error');
+        }
+    } catch(e) {
+        log('错误: ' + e.message, 'error');
+    }
+}
+
+async function sendCustom() {
+    var route = document.getElementById('customRoute').value;
+    log('发送自定义请求: route=' + route);
+    try {
+        var res = await fetch('/admin/api/gm?route=' + encodeURIComponent(route));
+        var data = await res.json();
+        log('响应成功 (' + data.size + ' bytes), 前10字节: ' + data.preview, 'success');
+    } catch(e) {
+        log('错误: ' + e.message, 'error');
+    }
+}
+
+async function sendCurrency() {
+    var type = document.getElementById('currencyType').value;
+    var count = document.getElementById('currencyCount').value;
+    log('发放货币: type=' + type + ', count=' + count);
+    try {
+        var res = await fetch('/admin/api/gm/addcurrency?type=' + encodeURIComponent(type) + '&count=' + encodeURIComponent(count));
+        var data = await res.json();
+        if (data.success) {
+            log('货币发放成功! 类型=' + data.type + ', 当前总额=' + data.newTotal, 'success');
+        } else {
+            log('货币发放失败: ' + data.error, 'error');
+        }
+    } catch(e) {
+        log('错误: ' + e.message, 'error');
+    }
+}
+
+log('管理面板已就绪。点击上方按钮发送 GM 命令。');
+log('提示: 需要游戏客户端连接到私服后 GM 命令才会生效。');
+</script>
+</body>
+</html>

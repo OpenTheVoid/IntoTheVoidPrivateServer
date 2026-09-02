@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>IntoTheVoidServer</RootNamespace>
+    <AssemblyName>IntoTheVoidServer</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="TestClient\**" />
+    <Compile Remove="RsaKeyGen\**" />
+    <None Remove="TestClient\**" />
+    <None Remove="RsaKeyGen\**" />
+    <!-- 发布时不复制这些纯开发/中间件目录，避免交付包混入冗余 -->
+    <Content Remove="TestClient\**" />
+    <Content Remove="RsaKeyGen\**" />
+    <Content Remove="publish\**" />
+    <Content Remove="bin\**" />
+    <Content Remove="obj\**" />
+    <Content Remove="logs\**" />
+    <Content Remove="patched\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="rsa_private_key.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- 把运行必备的回放数据随发布输出一起复制，避免发布版缺 Data/responses -->
+  <ItemGroup>
+    <Content Include="Data/responses/**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" Version="3.30.0" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />
+    <PackageReference Include="Serilog.Extensions.Hosting" Version="9.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+  </ItemGroup>
+
+</Project>
