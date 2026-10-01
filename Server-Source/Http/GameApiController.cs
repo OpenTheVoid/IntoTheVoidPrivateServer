@@ -1,3 +1,6 @@
+using IntoTheVoidServer.Accounts;
+using IntoTheVoidServer.Pomelo;
+using IntoTheVoidServer.Router;
 using Microsoft.AspNetCore.Mvc;
 using Serilog;
 using System.Security.Cryptography;
@@ -10,45 +13,21 @@ namespace IntoTheVoidServer.Http;
 [Route("")]
 public class GameApiController : ControllerBase
 {
-    // 官方 uid 为纯数字字符串（客户端 RoomManagerDemo.OnEnter 会 int.Parse(uid)，
-    // 若为 GUID 会抛 FormatException 导致卡「载入中」）。此处使用固定纯数字 uid。
-    private static readonly string UserUid = "34184063";
-    private static readonly string SessionToken = GenerateJwtToken();
     private const string ServerIp = "127.0.0.1";
     private const int ServerPort = 30531;
 
+    /// <summary>短信/实名等辅助端点的占位 token。</summary>
+    private static readonly string SessionToken = Guid.NewGuid().ToString("N");
+
     private static readonly string? RsaPrivateKeyBase64 = LoadPrivateKey();
 
-    private static string GenerateJwtToken()
-    {
-        // Build a JWT token matching the game's expected format (HS256)
-        var header = "{\"alg\":\"HS256\",\"typ\":\"JWT\"}";
-        var payload = JsonSerializer.Serialize(new
-        {
-            platform = 1,
-            scp = 1,
-            birth_timestamp = 631152000, // 1990-01-01 - adult
-            pwd = "offline",
-            exp = DateTimeOffset.UtcNow.AddDays(30).ToUnixTimeSeconds(),
-            jti = Guid.NewGuid().ToString("D"),
-            iat = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-            nbf = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-            sub = UserUid,
-        });
-        var headerB64 = Base64UrlEncode(Encoding.UTF8.GetBytes(header));
-        var payloadB64 = Base64UrlEncode(Encoding.UTF8.GetBytes(payload));
-        // We don't have a real HS256 secret, but the game likely doesn't verify JWT on client side
-        // Just add a dummy signature
-        var signatureB64 = Base64UrlEncode(Encoding.UTF8.GetBytes("offline_signature"));
-        return $"{headerB64}.{payloadB64}.{signatureB64}";
-    }
+    private readonly IWebHostEnvironment _env;
+    private readonly PlayerSessionManager _session;
 
-    private static string Base64UrlEncode(byte[] input)
+    public GameApiController(IWebHostEnvironment env, PlayerSessionManager session)
     {
-        return Convert.ToBase64String(input)
-            .Replace('+', '-')
-            .Replace('/', '_')
-            .TrimEnd('=');
+        _env = env;
+        _session = session;
     }
 
     private static string? LoadPrivateKey()
@@ -64,67 +43,144 @@ public class GameApiController : ControllerBase
         return null;
     }
 
-    // ========== /login - 登录端点 ==========
+    // ==================================================================
+    // /login —— 一个端点，两种角色
+    //
+    // 客户端的登录分两步，两步都打到这里（域名不同，插件 DNS 劫持后都指向本机）：
+    //   1) 账号服务器 official.jinzhangshu.com/login   body 带 account + password(RSA密文)
+    //      -> 校验账号密码，下发 token
+    //   2) 游戏服务器   <game>/login                   body 带 current_token
+    //      -> token 换 uid，并把该 uid 的独立存档装载进内存
+    // ==================================================================
     [HttpPost("login")]
     public async Task<IActionResult> Login()
     {
         using var reader = new StreamReader(Request.Body);
         var body = await reader.ReadToEndAsync();
         var host = Request.Host.Host;
-        Log.Information("[GameAPI] POST /login from {Host} body={Body}", host, body);
 
-        // Parse body to determine login type
-        var hasPassword = body.Contains("\"password\"");
-        var hasCurrentToken = body.Contains("\"current_token\"");
-
-        // official.jinzhangshu.com is the account server - always returns JSON token
-        if (host.StartsWith("official.", StringComparison.OrdinalIgnoreCase))
+        string? account = null, passwordCipher = null, currentToken = null;
+        try
         {
-            return OfficialLogin(body);
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var prop in doc.RootElement.EnumerateObject())
+                {
+                    var value = prop.Value.ValueKind == JsonValueKind.String
+                        ? prop.Value.GetString()
+                        : prop.Value.ToString();
+                    switch (prop.Name)
+                    {
+                        case "account": account = value; break;
+                        case "password": passwordCipher = value; break;
+                        case "current_token": currentToken = value; break;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // 非 JSON 体（历史行为是直接回空响应），走下面按 token 的分支即可
         }
 
-        if (hasPassword && !hasCurrentToken)
-        {
-            return OfficialLogin(body);
-        }
+        Log.Information("[GameAPI] POST /login host={Host} account={Account} 模式={Mode}",
+            host, account ?? "-",
+            !string.IsNullOrEmpty(passwordCipher) ? "账号密码"
+                : (!string.IsNullOrEmpty(currentToken) ? "token换uid" : "未知"));
 
-        return GameServerLogin(body);
+        if (host.StartsWith("official.", StringComparison.OrdinalIgnoreCase) || !string.IsNullOrEmpty(passwordCipher))
+            return OfficialLogin(account, passwordCipher);
+
+        return GameServerLogin(currentToken);
     }
 
-    // 官方账号登录 - 返回 JSON
-    private IActionResult OfficialLogin(string body)
+    /// <summary>账号服务器角色：校验账号密码，下发 token。</summary>
+    private IActionResult OfficialLogin(string? account, string? passwordCipher)
     {
-        Log.Information("[GameAPI] Official login, returning JSON token");
+        AccountStore.Reload(); // 登录器可能在服务端运行期间建号/删号
 
+        var rec = AccountStore.Authenticate(account, passwordCipher, out var code, out var reason);
+        if (rec == null)
+        {
+            Log.Warning("[GameAPI] 账号登录被拒: account={Account}, code={Code} ({Name}) 原因={Reason}",
+                account ?? "-", code, ErrorCodeName(code), reason ?? "-");
+
+            // 必须返回**非 200**，两个理由：
+            //   1) LuaNetManager:SendHttpMessage 只在 !IsSuccess 时读 body 的小写 "code"，
+            //      调 TipManager:ShowErrorCodeTips 弹文案；
+            //   2) LoginVM:SendOfficialLoginMsg 也只在非 200 分支才 CleanToken()。
+            //      若这里返回 200 且不带 token，客户端会带着上一个账号残留的 token
+            //      继续走游戏服登录 → 串号进错存档。
+            // body 只用小写 code（不放 Code），避免大小写两处各弹一次提示。
+            return StatusCode(StatusCodes.Status401Unauthorized,
+                new { code, msg = reason ?? ErrorCodeName(code) });
+        }
+
+        Log.Information("[GameAPI] 账号登录通过: account={Account} uid={Uid}", rec.Username, rec.Uid);
         return Ok(new
         {
-            token = SessionToken,
+            token = rec.Token,
             need_authorization = false,
         });
     }
 
-    // 游戏服务器登录 - 返回 URL编码 + RSA签名
-    private IActionResult GameServerLogin(string body)
+    /// <summary>游戏服务器角色：token 换 uid，并装载该账号的独立存档。</summary>
+    private IActionResult GameServerLogin(string? currentToken)
     {
-        Log.Information("[GameAPI] Game server login, returning URL-encoded with RSA signature");
+        AccountStore.Reload();
 
-        var uid = UserUid;
-        var token = SessionToken;
-        var secret = SessionToken;
+        var rec = AccountStore.FindByToken(currentToken);
+        if (rec == null)
+        {
+            // 105003028 = 登录secret失效 —— 客户端会提示并退回登录界面
+            Log.Warning("[GameAPI] 游戏服登录失败: token 无效或已过期");
+            return Content("errcode=105003028&uid=&token=&secret=&showpolicy=0&showtest=&newaccount=0",
+                "text/plain", Encoding.UTF8);
+        }
 
-        // Build response without sign
-        var responseData = $"errcode=0&uid={uid}&token={token}&secret={secret}&showpolicy=0&showtest=&newaccount=0";
+        _session.CurrentPlayerId = rec.Uid;
+        _session.SessionTicket = rec.Token;
+        _session.IsLoggedIn = true;
 
-        // Sign with RSA-SHA1
+        // 多账号存档隔离：装载该 uid 的响应集与货币状态
+        var root = _env.ContentRootPath;
+        CapturedData.LoadForPlayer(root, rec.Uid);
+        GameState.ActivatePlayer(root, rec.Uid);
+        // 悖域巡查(突击警报)进度：基线取自该账号的 AlertEventInfoResponse 快照，
+        // 再叠加 Data/saves/<uid>/alert_progress.json 里服务端记录的进度。
+        // 必须在 CapturedData.LoadForPlayer 之后（需要读快照）。
+        AlertEventProgress.ActivatePlayer(root, rec.Uid);
+        // 悖域回归(局外周本)进度：基线取自该账号的 WeeklyQuestInfoResponse 快照
+        // (其中的 ChoseQuests 长度 = 已解锁任务数)，再叠加
+        // Data/saves/<uid>/weekly_progress.json。同样必须在 LoadForPlayer 之后。
+        WeeklyProgress.ActivatePlayer(root, rec.Uid);
+        // 物品/货币持有量账本：结算奖励下发的 Amount/Count 是"更新后总量"而不是增量
+        // （客户端处处做"新值-旧值"），所以服务端必须自己记一份持有量。
+        // 基线取自该账号的 BackPackListResponse / PlayerDataResponse 快照，
+        // 同样必须在 CapturedData.LoadForPlayer 之后。见 Pomelo/ItemLedger.cs。
+        ItemLedger.ActivatePlayer(root, rec.Uid);
+
+        var responseData =
+            $"errcode=0&uid={rec.Uid}&token={rec.Token}&secret={rec.Token}&showpolicy=0&showtest=&newaccount=0";
         var sign = SignData(responseData);
 
-        // Full response: data + &sign=signature
-        var fullResponse = $"{responseData}&sign={sign}";
+        Log.Information("[GameAPI] 游戏服登录成功: account={Account} uid={Uid}",
+            rec.Username, rec.Uid);
 
-        Log.Information("[GameAPI] Login response: {Response}", fullResponse);
-
-        return Content(fullResponse, "text/plain", Encoding.UTF8);
+        return Content($"{responseData}&sign={sign}", "text/plain", Encoding.UTF8);
     }
+
+    private static string ErrorCodeName(int code) => code switch
+    {
+        105003001 => "账号不合法",
+        105003002 => "账号已存在",
+        105003003 => "账号不存在",
+        105003034 => "账号或密码错误",
+        105003028 => "登录secret失效",
+        105003021 => "登录失败",
+        _ => "登录失败",
+    };
 
     private string SignData(string data)
     {
@@ -140,9 +196,7 @@ public class GameApiController : ControllerBase
             rsa.ImportPkcs8PrivateKey(Convert.FromBase64String(RsaPrivateKeyBase64), out _);
             var dataBytes = Encoding.UTF8.GetBytes(data);
             var signatureBytes = rsa.SignData(dataBytes, HashAlgorithmName.SHA1, RSASignaturePadding.Pkcs1);
-            var signBase64 = Convert.ToBase64String(signatureBytes);
-            Log.Information("[GameAPI] RSA signature created, length={Length}", signBase64.Length);
-            return signBase64;
+            return Convert.ToBase64String(signatureBytes);
         }
         catch (Exception ex)
         {
@@ -214,7 +268,6 @@ public class GameApiController : ControllerBase
         var host = Request.Host.Host;
         Log.Information("[GameAPI] POST /ping from {Host} body={Body}", host, body);
 
-        // 官方服的ping返回防沉迷信息
         return Ok(new
         {
             need_authorization = false,
@@ -305,7 +358,7 @@ public class GameApiController : ControllerBase
             data = new
             {
                 need_authorization = false,
-                age_range = 8, // 8表示成年人
+                age_range = 8,
                 is_adult = true,
                 can_play = true,
                 remaining_time = -1,

@@ -24,12 +24,29 @@ public static class GameState
     /// <summary>Seed default currencies and load any persisted state on top.</summary>
     public static void InitializeDefaults()
     {
+        SeedDefaults();
+        Load();
+    }
+
+    private static void SeedDefaults()
+    {
         Currencies.TryAdd(1, 999999);   // Gold
         Currencies.TryAdd(2, 0);        // Diamond
         Currencies.TryAdd(14, 0);       // BoundDiamond
         Currencies.TryAdd(21, 0);       // CrystalCredit (晶卷)
+    }
 
+    /// <summary>
+    /// 切换到指定账号的货币状态（登录时调用）。切换后所有 GM 加币/消费都落在该账号的
+    /// Data/saves/&lt;uid&gt;/gamestate.json，账号之间互不影响。
+    /// </summary>
+    public static void ActivatePlayer(string contentRoot, string uid)
+    {
+        _savePath = Path.Combine(contentRoot, "Data", "saves", uid, "gamestate.json");
+        Currencies.Clear();
+        SeedDefaults();
         Load();
+        Serilog.Log.Information("[GameState] 已切换到账号 uid={Uid} 的货币状态: {Path}", uid, _savePath);
     }
 
     public static int GetCurrency(int type) => Currencies.TryGetValue(type, out var count) ? count : 0;

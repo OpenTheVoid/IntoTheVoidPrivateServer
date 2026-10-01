@@ -16,6 +16,24 @@ public class MessageRouter
     {
         _sessionManager = sessionManager;
         RegisterDefaultHandlers();
+
+        // 依据客户端热更程序集 (Assembly-CSharp.dll) 补齐尚未覆盖的接口,
+        // 使私服对客户端协议面形成完整覆盖。生成物见 Generated/ClientRoutes.generated.cs
+        var backfilled = ClientRoutes.Register(this);
+        Log.Information(
+            "ClientRoutes: 客户端接口 {Total} 个, 本次补齐 {Added} 个路由注册",
+            ClientRoutes.AllClientRequests.Count, backfilled);
+
+        // 再用真实数据覆盖"客户端实际调用过"的那批接口(原先返回空字节)。
+        // 必须在 ClientRoutes 之后注册, 因为 RegisterHandler 是覆盖语义。
+        var enriched = MissingInterfaceResponses.Register(this);
+        Log.Information("MissingInterfaceResponses: {Count} 个接口已改用真实数据响应", enriched);
+
+        // 局内任务/互动类缺口路由 (BattleQuestReward / SetQuestSteps /
+        // IngameInteractionChange)。必须最后注册: RegisterHandler 是覆盖语义,
+        // 且其对应 0 字节捕获响应已在 Data/responses 中删除, 否则请求被 .bin 抢占。
+        var questStep = QuestStepResponses.Register(this);
+        Log.Information("QuestStepResponses: {Count} 个接口已注册", questStep);
     }
 
     public void RegisterHandler(string route, MessageHandler handler)

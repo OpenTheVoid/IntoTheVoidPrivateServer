@@ -93,6 +93,15 @@ echo   http://127.0.0.1:8183/admin/
 echo.
 echo 日志文件：%SERVER_DIR%\logs\server_YYYYMMDD.log
 echo.
-echo 提示：现在可以启动游戏客户端 IntoTheVoid.exe，输入任意账号密码即可登录。
+echo ==========================================
+echo   下一步：先建号，再进游戏
+echo ==========================================
+echo   1) 双击运行  Launcher\publish\驱入虚空登录器.exe
+echo      - 服务端目录选到本包的 Server 目录
+echo      - 点「新建账号」创建（账号为 3-11 位纯数字）
+echo   2) 双击游戏根目录的 IntoTheVoid.exe
+echo      - 登录界面选「官方账号登录」，输入刚建的账号密码
+echo.
+echo   注意：服务端不含建号接口，未建号会提示「账号不存在」。
 echo.
 pause

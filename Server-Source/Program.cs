@@ -5,6 +5,7 @@ using IntoTheVoidServer.Router;
 using Serilog;
 using System.Security.Cryptography.X509Certificates;
 using IntoTheVoidServer;
+using IntoTheVoidServer.Accounts;
 
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Information()
@@ -63,6 +64,16 @@ try
     GamePaths.Initialize(builder.Environment.ContentRootPath);
     GameState.SetSavePath(builder.Environment.ContentRootPath);
     GameState.InitializeDefaults();
+
+    // 账号库 + 多账号独立存档。
+    //   1) 把升级前的全局存档迁移成 saves/34184063（原档，可作模板/导入来源）
+    //   2) 载入 Data/accounts.json（登录器在外部维护，服务端每次登录请求都会重读）
+    PlayerSaveStore.Log = m => Log.Information("{Msg}", m);
+    AccountStore.Log = m => Log.Information("{Msg}", m);
+    PlayerSaveStore.MigrateLegacySave(builder.Environment.ContentRootPath);
+    AccountStore.Initialize(builder.Environment.ContentRootPath);
+    Log.Information("AccountStore: 已载入 {Count} 个账号 (saves 根目录: {SavesRoot})",
+        AccountStore.Count, PlayerSaveStore.SavesRootOf(builder.Environment.ContentRootPath));
 
     // Global error handler + request logging
     app.Use(async (context, next) =>
@@ -137,6 +148,15 @@ try
     // Load captured official server data
     var dataDir = Path.Combine(builder.Environment.ContentRootPath, "Data");
     CapturedData.Load(dataDir);
+
+    // 掉落配置表（EnemyDrop / EnemyLoot / ItemPool / WorldPool / Level / Item）——
+    // 由 memory/_export_drop_tables.py 从客户端 bundle 导出，服务端据此逐关生成掉落，
+    // 填充 LevelEnemyDropResponse.TypeDropList。
+    DropTables.EnsureLoaded(builder.Environment.ContentRootPath);
+    if (DropTables.IsLoaded)
+        Log.Information("DropTables: 已载入 {Stats}", DropTables.DumpStats());
+    else
+        Log.Warning("DropTables: 未载入 ({Err}) —— 敌人将不掉落物品", DropTables.LoadError);
 
     var tcpServer = app.Services.GetRequiredService<PomeloTcpServer>();
     var tcpTask = tcpServer.StartAsync();

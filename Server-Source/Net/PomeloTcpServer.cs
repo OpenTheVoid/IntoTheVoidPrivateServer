@@ -18,6 +18,29 @@ public class PomeloTcpServer
     // endpoints to push live updates (e.g. currency grants) to online players.
     private static readonly ConcurrentDictionary<string, NetworkStream> ActiveClients = new();
 
+    // ---------------------------------------------------------------------
+    // 登录同步风暴节流 (2026-09-03)。
+    // 客户端 IL2CPP 终结器线程存在一个既有崩溃点: 7 个 crash dump
+    // (Sep2 21:18/21:19、Sep3 18:58、Sep3 21:12-21:13) 全部崩在
+    // GameAssembly+0x546f09 (test byte [rcx+0x4c],0x10, rcx=非法指针),
+    // 且终结对象各不相同 (Recorder/TextureCurve/X509CertificateImpl/MD5/...) ——
+    // 即终结器机制本身的堆损坏, 与本次服务端改动无关。
+    // 崩溃集中在登录窗口 (gate.Entry 后 2-4s 的 ~60 个响应风暴; 偶发更早)。
+    // 官方服有真实 RTT 天然削峰, 私服 0 延迟回包把瞬时分配/GC 压力拉满。
+    // 这里在 gate.Entry 后的窗口内给每个响应加小间隔, 模拟官方延迟。
+    // ---------------------------------------------------------------------
+    private static long _gateEntryTicksUtc;
+    private const int LoginBurstWindowSeconds = 12;
+    private const int LoginBurstPacingMs = 25;
+
+    private static bool InLoginBurstWindow()
+    {
+        var ticks = System.Threading.Interlocked.Read(ref _gateEntryTicksUtc);
+        if (ticks == 0) return false;
+        var elapsed = (DateTime.UtcNow.Ticks - ticks) / TimeSpan.TicksPerSecond;
+        return elapsed >= 0 && elapsed < LoginBurstWindowSeconds;
+    }
+
     public PomeloTcpServer(int port, MessageRouter router)
     {
         _port = port;
@@ -184,11 +207,30 @@ public class PomeloTcpServer
         {
             byte[]? responsePayload = null;
 
-            if (CapturedData.Responses.TryGetValue(route, out var captured))
+            // ① 动态响应层：优先于静态捕获快照。
+            // 语义会随时间变化的字段必须实时生成——典型是
+            //  · AlertEventInfoResponse 里悖域巡查(sortie) 段的 CurrentIndex(=当前应打的关卡序号)
+            //  · WeeklyQuestInfoResponse 里的 ChoseQuests(=已解锁的悖域回归周本任务)
+            // 抓包快照里它们是定值，直接回放会让"通关第 1 关后第 2 关永不解锁"。
+            // 见 Pomelo/AlertEventProgress.cs 与 Pomelo/WeeklyProgress.cs。
+            if (AlertEventProgress.TryBuildDynamicResponse(route, contract.data, out var dynamicPayload)
+                || WeeklyProgress.TryBuildDynamicResponse(route, contract.data, out dynamicPayload))
+            {
+                Log.Information("[{Remote}] Using dynamic response for {Route} ({Size} bytes)",
+                    remote, route, dynamicPayload?.Length ?? 0);
+                responsePayload = dynamicPayload;
+            }
+            else if (CapturedData.Responses.TryGetValue(route, out var captured))
             {
                 Log.Information("[{Remote}] Using captured response for {Route} ({Size} bytes)",
                     remote, route, captured.Length);
                 responsePayload = captured;
+
+                // 客户端重拉背包快照 => 客户端本地背包被重置回快照值，
+                // 服务端账本必须同步重置，否则下次结算下发的"总量"会对不上客户端旧值。
+                // 见 Pomelo/ItemLedger.cs。
+                if (route == "game.game.BackPackListRequest")
+                    ItemLedger.OnBagSnapshotReplayed();
 
                 // The official capture's LevelBegin/LevelResource responses hard-code
                 // the main-city level ID (43400330). When the client enters a battle
@@ -201,8 +243,11 @@ public class PomeloTcpServer
                     var rewritten = ProtoLevelIdRewriter.TryRewriteLevelId(contract.data, responsePayload);
                     if (rewritten != null)
                     {
-                        Log.Information("[{Remote}] Rewrote {Route} LevelID to match request ({Old} bytes -> {New} bytes)",
-                            remote, route, responsePayload.Length, rewritten.Length);
+                        long? reqLevel = ProtoLevelIdRewriter.ReadVarint(contract.data, 1)?.value;
+                        long? oldLevel = ProtoLevelIdRewriter.ReadVarint(responsePayload, 1)?.value;
+                        long? newLevel = ProtoLevelIdRewriter.ReadVarint(rewritten, 1)?.value;
+                        Log.Information("[{Remote}] Rewrote {Route} LevelID {OldLevel} -> {NewLevel} to match request ({Old} bytes -> {New} bytes, requestLevel={ReqLevel})",
+                            remote, route, oldLevel, newLevel, responsePayload.Length, rewritten.Length, reqLevel);
                         responsePayload = rewritten;
                     }
                 }
@@ -211,6 +256,12 @@ public class PomeloTcpServer
             {
                 Log.Warning("[{Remote}] No captured response for {Route}, falling back to router", remote, route);
                 responsePayload = await _router.HandleAsync(route, contract.data, contract.type);
+            }
+
+            // 登录风暴节流: gate.Entry 窗口内每个响应前加小间隔 (见字段说明)
+            if (route != "gate.Entry" && InLoginBurstWindow())
+            {
+                await Task.Delay(LoginBurstPacingMs);
             }
 
             if (contract.type == MessageType.Request && responsePayload != null)
@@ -244,6 +295,7 @@ public class PomeloTcpServer
             // After gate.Entry, send initial push messages to complete loading
             if (route == "gate.Entry" && contract.type == MessageType.Request)
             {
+                System.Threading.Interlocked.Exchange(ref _gateEntryTicksUtc, DateTime.UtcNow.Ticks);
                 _ = SendInitialPushesAsync(stream, remote);
             }
         }

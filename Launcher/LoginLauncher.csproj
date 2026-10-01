@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- 程序集名用英文：dll/deps.json/runtimeconfig.json/pdb 都叫 IntoTheVoidLauncher.*，
+         避免一堆「驱入虚空登录器.*」同名文件挤在一起分不清。
+         只有 exe（运行文件）发布后由下方 target 改成中文名「驱入虚空登录器.exe」。 -->
+    <AssemblyName>IntoTheVoidLauncher</AssemblyName>
+    <RootNamespace>IntoTheVoidLauncher</RootNamespace>
+    <StartupObject>IntoTheVoidLauncher.Program</StartupObject>
+    <Product>驱入虚空登录器</Product>
+    <AssemblyTitle>驱入虚空登录器</AssemblyTitle>
+    <Version>1.0.0</Version>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <!-- 发布后只把「运行文件」改成中文名。
+       apphost 在编译期就把程序集名写死进 exe，运行时按 <exe目录>/<程序集名>.dll 寻址，
+       与 exe 自身文件名无关 —— 所以 exe 可以单独改中文名而不影响启动。 -->
+  <Target Name="RenameLauncherExe" AfterTargets="Publish">
+    <Move SourceFiles="$(PublishDir)IntoTheVoidLauncher.exe"
+          DestinationFiles="$(PublishDir)驱入虚空登录器.exe"
+          Condition="Exists('$(PublishDir)IntoTheVoidLauncher.exe')" />
+    <Message Importance="high" Text="运行文件 → $(PublishDir)驱入虚空登录器.exe" />
+  </Target>
+
+  <!-- 直接复用服务端的账号/存档核心逻辑（同一份源码），保证两侧数据格式永远一致。
+       注意：本仓库中服务端源码位于 ../Server-Source/，故引用路径与开发树略不同。 -->
+  <ItemGroup>
+    <Compile Include="..\Server-Source\Accounts\AccountStore.cs" Link="Shared\AccountStore.cs" />
+    <Compile Include="..\Server-Source\Accounts\PlayerSaveStore.cs" Link="Shared\PlayerSaveStore.cs" />
+  </ItemGroup>
+
+</Project>

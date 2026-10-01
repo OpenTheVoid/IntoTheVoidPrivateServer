@@ -27,11 +27,25 @@
     <None Update="rsa_private_key.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <!-- 密码传输用私钥：服务端用它解密客户端（插件用私服公钥重新加密过）上传的口令密文 -->
+    <None Update="pw_rsa_private_key.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <!-- 把运行必备的回放数据随发布输出一起复制，避免发布版缺 Data/responses -->
   <ItemGroup>
     <Content Include="Data/responses/**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- 掉落配置表（bundle 导出 JSON，服务端逐关生成掉落时查表）。
+       Web SDK 默认已把 *.json 纳入 Content，这里只补上"复制到输出目录"。
+       刻意排除 Data 根目录下的 proto_schema*.json（仅供开发期查阅，14MB 不进交付包）。 -->
+  <ItemGroup>
+    <Content Update="Data/tables/**" CopyToOutputDirectory="PreserveNewest" />
+    <Content Update="Data/proto_schema.json" CopyToOutputDirectory="Never" />
+    <Content Update="Data/proto_schema_full.json" CopyToOutputDirectory="Never" />
+    <Content Update="Data/interface_gap.md" CopyToOutputDirectory="Never" />
   </ItemGroup>
 
   <ItemGroup>

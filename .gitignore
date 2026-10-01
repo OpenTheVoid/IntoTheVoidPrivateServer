@@ -4,21 +4,36 @@ Server/logs/
 Server/*.log
 *.log
 
+# 服务端运行时生成的账号与存档（绝对不要提交！）
+Server/Data/accounts.json
+Server/Data/accounts.json.*
+Server/Data/saves/
+Server/Data/backups/
+Server-Source/Data/backups/
+Server-Source/logs/
+
 # ===== 编译产物（若在 Server-Source 内执行 dotnet build/publish）=====
 bin/
 obj/
 publish/
+Server/publish/
+Server/release_staging/
 Server-Source/bin/
 Server-Source/obj/
+Server-Source/publish/
 
 # ===== 临时/备份 =====
 *.bak
+*.bak_*
 *.crash_*
 *.tmp
+*.orig
 Thumbs.db
 .DS_Store
 
 # ===== 本仓库应保留的内容（勿加 ignore）=====
-# Server/Data/responses/  -> 官方回放数据，运行必需
-# Client-Plugin/          -> BepInEx + dotnet 运行时 + 插件，运行必需
-# cert.* / rsa_*.txt      -> 自签证书与 RSA 密钥，运行必需
+# Server/Data/responses/     -> 官方回放数据，运行必需
+# Server/Data/tables/        -> 掉落/结算配置表，运行必需
+# Server-Source/HotAssembly/ -> 协议对齐所依据的热更程序集
+# Client-Plugin/             -> BepInEx + dotnet 运行时 + 插件，运行必需
+# cert.* / rsa_*.txt         -> 自签证书与 RSA 密钥，运行必需

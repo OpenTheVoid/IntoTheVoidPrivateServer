@@ -1,0 +1,40 @@
+════════════════════════════════════════════════════════════
+IntoTheVoid(驱入虚空)热更程序集 · 归档说明
+════════════════════════════════════════════════════════════
+
+来源:原版游戏 YooAsset CacheFiles bundle(9bcdee9a...)经 UnityPy 提取,
+     2026-08-09 提取, 2026-08-15 G→E 盘迁移校验(哈希一致)。
+
+【文件清单】
+
+1. Assembly-CSharp.dll          ~22.5MB  热更主程序集【原始正本·未改名】
+   - HybridCLR 热更核心,含 TPS.RunTime 战斗框架 / BaseUnit / 全部游戏逻辑
+   - 可被 ilspycmd / dnfile / dnSpy 直接反编译(有真实方法体)
+   - 注意:直接叫 Assembly-CSharp 会和 Unity 默认源码程序集同名冲突
+
+2. Assembly-CSharp_orig.dll     ~22.5MB  【原始留档备份】
+   - 与 Assembly-CSharp.dll 内容完全一致(MD5 相同),双份保险
+
+3. Assembly-CSharp-firstpass.dll ~2.8MB  热更 firstpass 库【原始·保留原名】
+   - 含 Ink / Spine / BestHTTP / BouncyCastle 等第三方库类型
+
+4. GameHotAssembly.dll          ~22.4MB  工程内正式使用版【已改名】
+   - 由 Assembly-CSharp.dll 等长替换程序集名而来(Assembly-CSharp→GameHotAssembly)
+   - dnlib 进一步处理:全局命名空间类型加 Game 前缀、ObjectPool 改名等
+   - 供 Unity 工程编译引用,类型全名与原始 DLL 一致(改名由 dnlib 自动更新引用)
+
+【其他位置】
+- 工程内完整插件目录(含 80+ DummyDll 桩):
+    E:\IntoTheVoid_Unity\Assets\Plugins\GameDLL\   (140 个文件)
+- 原始提取目录:
+    E:\IntoTheVoid_Extracted\_hotupdate_dll\
+
+【警告】
+- Plugins/GameDLL/ 下除上述 DLL 外,大部分是 Il2CppDumper 生成的
+  DummyDll【空壳桩】(含 Newtonsoft.Json.dll),只用于编译期引用,
+  方法体为空,不能在运行时调用!
+- 有真实方法体的只有:GameHotAssembly.dll / Assembly-CSharp-firstpass.dll
+  (以及本目录中对应的原始版)
+
+生成日期:2026-09-02
+════════════════════════════════════════════════════════════
